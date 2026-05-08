@@ -6,6 +6,13 @@ import torch.nn as nn
 import torch.optim as optim
 from scipy.optimize import minimize
 import time
+import json
+import uuid
+import requests
+from datetime import datetime
+import paho.mqtt.client as mqtt
+from apscheduler.schedulers.blocking import BlockingScheduler
+from shared_lib.config import config
 
 warnings.filterwarnings('ignore')
 
@@ -151,93 +158,126 @@ def bayesian_tune_vae_admm(env, trials=5):  # 为演示加快速度，设为5
 
 
 # ==========================================
-# 🔌 云边架构系统对接插槽 (System Interface Mocks)
+# 🔌 真实系统对接层
 # ==========================================
 
-class Layer1_DatabaseMock:
-    """Mock InfluxDB：读取历史 24 小时数据"""
+class RealAIModelClient:
+    """对接真实的 FastAPI AI 微服务"""
 
     @staticmethod
-    def get_historical_data(current_hour):
-        print(f"[层1 - 数据库] 从 InfluxDB 拉取 {current_hour}:00 之前的 24 小时边缘端仿真回写数据...")
-        # 实际开发中这里是 InfluxDB Client 查询代码
-        return {"status": "ok", "data_len": 24}
+    def get_predictions(current_hour):
+        print(f"[AI 大脑] 正在请求 {current_hour}:00 的基准负荷与弹性系数...")
+        # 方案A: 如果 AI 是独立微服务，发起真实 HTTP 请求
+        # response = requests.get(f"http://ai-service:8000/api/predict?hour={current_hour}")
+        # data = response.json()
+        # return np.array(data['predicted_load']), np.array(data['elasticity_coefficient']), np.array(data['base_price'])
 
+        # 方案B: 本地单机闭环仿真模式 (单体调用)
+        from ai_prediction.services.inference_service import inference_service
+        # 这里需要传入历史特征和邻接矩阵，具体视你的特征获取逻辑而定
+        # result = inference_service.predict_and_evaluate_elasticity(historical_features, adj_matrix)
+        # return np.array(result['predicted_load']), np.array(result['elasticity_coefficient']), np.array(result['base_price'])
 
-class Layer2_AIModelMock:
-    """Mock FastAPI AI微服务：预测下一小时负载与价格弹性"""
-
-    @staticmethod
-    def predict_next_hour(history_data, current_hour):
-        print(
-            f"[层2 - AI大脑] 调用 Docker 容器化的时空图 AI 微服务，生成 {current_hour}:00 - {current_hour + 1}:00 的预测...")
-        # 实际开发中： response = requests.post("http://ai-service:8000/predict", json=history_data)
+        # 为了演示代码可直接运行，暂时保留随机生成，但接入了 config
+        import numpy as np
         np.random.seed(current_hour)
-        predicted_load = np.random.normal(110, 8, N_AREAS)
-        predicted_elasticity = np.random.uniform(ELASTICITY_RANGE[0], ELASTICITY_RANGE[1], N_AREAS)
-        base_price = np.random.uniform(0.6, 0.8, N_AREAS)
+        predicted_load = np.random.normal(110, 8, config.N_AREAS)
+        predicted_elasticity = np.random.uniform(config.ELASTICITY_RANGE[0], config.ELASTICITY_RANGE[1], config.N_AREAS)
+        base_price = np.random.uniform(0.6, 0.8, config.N_AREAS)
         return predicted_load, predicted_elasticity, base_price
 
 
-class Layer4_MQTTEdgeMock:
-    """Mock MQTT：将决策核心的指令下发给边缘节点"""
+class RealMQTTEdgeClient:
+    """真实的 MQTT 下发模块，直连 EMQX"""
 
-    @staticmethod
-    def dispatch_commands(current_hour, r_opt, y_opt):
-        print(f"[层4 - MQTT执行] 正在向 {N_AREAS} 个区域边缘计算节点下发滚动控制指令...")
-        # 实际开发中： client.publish("v2g/area_01/cmd", payload)
+    def __init__(self):
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+        try:
+            self.client.connect(config.MQTT_BROKER, config.MQTT_PORT, config.MQTT_KEEPALIVE)
+            self.client.loop_start()
+            print("✅ [运筹层 MQTT] 已成功连接到消息总线")
+        except Exception as e:
+            print(f"❌ [运筹层 MQTT] 连接失败: {e}")
 
-        # 仅打印前3个区域的指令作为日志演示
-        for area_id in range(3):
-            price_adj_pct = r_opt[area_id] * 100
-            discharge_kwh = y_opt[area_id]
-            print(
-                f"   => [充电站 {area_id:03d}] 指令A: 电价调整 {price_adj_pct:+.1f}% | 指令B: 目标放电 {discharge_kwh:.2f} kWh")
+    def dispatch_commands(self, current_hour, r_opt, y_opt):
+        schedule_id = f"SCH_{datetime.now().strftime('%Y%m%d%H')}"
+        print(f"[阶段一指令下发] 正在向 {config.N_AREAS} 个边缘节点下发1小时级调度目标...")
+
+        for area_id in range(config.N_AREAS):
+            # 组装符合 data_hub/main.py 预期的数据格式
+            payload = {
+                "schedule_id": schedule_id,
+                "node_id": area_id,
+                "price_adj_rate": round(r_opt[area_id], 4),  # 指令A: 调价率
+                "power_set": round(y_opt[area_id], 2),  # 指令B: 目标放电量(kW或kWh)
+                "duration": config.MACRO_INTERVAL,  # 持续时间: 3600秒 (1小时)
+                "timestamp": datetime.now().isoformat()
+            }
+
+            # 发布调度指令到主题 v2g/cloud/schedule
+            self.client.publish(config.TOPIC_CLOUD_SCHEDULE, json.dumps(payload))
+
+            # 仅打印前3个作为日志
+            if area_id < 3:
+                print(
+                    f"   => [节点 {area_id:03d}] 调价: {payload['price_adj_rate'] * 100:+.1f}% | 目标放电: {payload['power_set']} kW")
 
 
 # ==========================================
-# ⚙️ 阶段一：云端宏观规划引擎 (核心业务流)
+# ⚙️ 阶段一：云端宏观规划引擎 (真实业务流)
 # ==========================================
 
 class CloudDecisionEngine:
     def __init__(self):
-        self.db = Layer1_DatabaseMock()
-        self.ai_service = Layer2_AIModelMock()
-        self.mqtt = Layer4_MQTTEdgeMock()
+        self.ai_client = RealAIModelClient()
+        self.mqtt_client = RealMQTTEdgeClient()
 
-    def run_stage_one_dispatch(self, current_hour):
+    def run_stage_one_dispatch(self):
         """执行流程图中的：阶段一：云端宏观规划（1小时级调度）"""
+        current_hour = datetime.now().hour
         print("\n" + "=" * 60)
-        print(f"🕒 触发系统时间: {current_hour}:00 | 开始阶段一：云端宏观规划")
+        print(f"🕒 触发系统时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 开始阶段一宏观规划")
         print("=" * 60)
 
-        # 1. 获取历史数据
-        history = self.db.get_historical_data(current_hour)
+        # 1. & 2. 获取数据与 AI 预测
+        pred_L, pred_E, pred_C = self.ai_client.get_predictions(current_hour)
 
-        # 2. 调用预测层
-        pred_L, pred_E, pred_C = self.ai_service.predict_next_hour(history, current_hour)
-
-        # 3. 构建运筹调度环境并寻优 (层3)
-        print(f"[层3 - 决策引擎] 启动多目标 VAE-WS-ADMM 优化器寻找帕累托最优解...")
+        # 3. 构建运筹调度环境并寻优 (调用原本的 VAE-WS-ADMM)
+        print(f"[运筹引擎] 启动多目标优化 (基于 VAE 热启动与 ADMM)...")
         start_time = time.time()
-        env = V2GEnvironment(pred_L, pred_E, pred_C, GRID_PRICE)
-        r_opt, y_opt = bayesian_tune_vae_admm(env, trials=BAYESIAN_TRIALS)
-        print(f"[层3 - 决策引擎] 优化计算完成，耗时: {time.time() - start_time:.2f} 秒")
+        # 注意这里传入 config.GRID_PRICE
+        env = V2GEnvironment(pred_L, pred_E, pred_C, config.GRID_PRICE)
+        r_opt, y_opt = bayesian_tune_vae_admm(env, trials=config.BAYESIAN_TRIALS)
+        print(f"[运筹引擎] 优化计算完成，耗时: {time.time() - start_time:.2f} 秒")
 
-        # 4. 指令解析与下发 (层4)
-        self.mqtt.dispatch_commands(current_hour, r_opt, y_opt)
+        # 4. 指令解析与真实 MQTT 下发
+        self.mqtt_client.dispatch_commands(current_hour, r_opt, y_opt)
 
         print("-" * 60)
-        print(f"✅ {current_hour}:00 调度指令下发完毕。边缘端将开始 5 分钟级滚动追踪 (阶段二)。")
+        print(f"✅ {current_hour}:00 宏观调度指令下发完毕。等待边缘端进行 5 分钟级滚动追踪...")
 
 
 # ==========================================
-# 🚀 平台启动入口 (模拟时间流逝)
+# 🚀 平台启动入口 (真实时间调度)
 # ==========================================
 if __name__ == '__main__':
     engine = CloudDecisionEngine()
 
-    # 模拟系统按照时钟运行 (例如从 8:00 到 10:00)
-    for hour in [8, 9, 10]:
-        engine.run_stage_one_dispatch(current_hour=hour)
-        time.sleep(1)  # 模拟等待进入下一个调度周期
+    if config.SIMULATION_MODE:
+        # 如果是单机快速仿真模式，直接跑几个小时测试
+        for hour in [8, 9, 10]:
+            engine.run_stage_one_dispatch()
+            time.sleep(2)
+    else:
+        # 生产环境模式：启动 APScheduler，每个小时的第 00 分 00 秒触发一次
+        scheduler = BlockingScheduler(timezone="Asia/Shanghai")
+        # 设定在每小时的 0 分钟执行
+        scheduler.add_job(engine.run_stage_one_dispatch, 'cron', minute=0)
+
+        print("⏱️ 云端决策引擎已启动，等待整点触发...")
+        # 启动时可以先强制执行一次以初始化状态
+        engine.run_stage_one_dispatch()
+        try:
+            scheduler.start()
+        except (KeyboardInterrupt, SystemExit):
+            pass
