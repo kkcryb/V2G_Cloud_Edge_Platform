@@ -10,8 +10,6 @@ app/services/elasticity_service.py
 import torch
 import numpy as np
 import logging
-from typing import Callable
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
