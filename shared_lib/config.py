@@ -44,6 +44,9 @@ class GlobalConfig:
     SEQ_LEN = 24  # 历史序列长度（过去24小时）
     PRE_LEN = 24  # 预测未来长度（未来24小时）
     MODEL_WEIGHTS_PATH = os.getenv("MODEL_PATH", "./checkpoints/best_model.pth")  #
+    # 微观弹性扰动参数
+    PRICE_PERTURBATION_RATIO = 0.01  # 价格扰动比例 1%
+    PRICE_FEATURE_INDEX = 1  # 电价在5维特征中的列索引
 
     # ==========================================
     # ⚙️ 3. 运筹调度引擎 (Optimization)
