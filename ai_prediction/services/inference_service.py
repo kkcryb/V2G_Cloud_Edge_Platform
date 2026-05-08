@@ -11,13 +11,8 @@ import torch
 import numpy as np
 import logging
 from typing import Dict, Any
-
-from app.models.gcn_lstm import Gcnlstm
-from app.core.config import settings
-from app.core.exceptions import ModelInferenceException
-
-# 引入刚刚写好的 elasticity_service
-from app.services.elasticity_service import elasticity_service
+from ai_prediction.models.gcn_lstm import Gcnlstm
+from ai_prediction.services.elasticity_service import elasticity_service
 
 logger = logging.getLogger(__name__)
 
