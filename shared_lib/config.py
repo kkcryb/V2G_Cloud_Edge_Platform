@@ -19,7 +19,7 @@ class GlobalConfig:
     # InfluxDB 配置
     INFLUX_URL = os.getenv("INFLUX_URL", "http://localhost:8086")  #
     INFLUX_TOKEN = os.getenv("INFLUX_TOKEN",
-                             "r9JyPrSWd43AiXptUeiVtWrKk1Ut38kjDxqBdfxeBDLVHj4wOrCgZ1_x8-Q-0oIeO9hkZKXWkSFt8PMZYiOccQ==")  #
+                             "CsD_NxHw34w2ta4ztFWJw8v0xb4V3tr4kVCMqU5PbWwWQf_6MzktxMOYHrZMJloVp4x5eUT_JBl-_ntZTf1xOw==")  #
     INFLUX_ORG = "my-org"  #
     INFLUX_BUCKET_RAW = "raw_data"  #
     INFLUX_BUCKET_AGG = "agg_data"  #
