@@ -18,7 +18,7 @@ def start_system():
 
         # 2. 启动边端仿真集群 (取代旧的 edge_simulation/main.py)
         print("[2/2] 启动边端并发仿真集群...")
-        edge_proc = subprocess.Popen([sys.executable, "main.py"])  # 运行包含 EdgeFleetSimulator 的 main.py
+        edge_proc = subprocess.Popen([sys.executable, "edge_simulation/main.py"])  # 运行包含 EdgeFleetSimulator 的 main.py
         processes.append(edge_proc)
 
         print("全系统启动完毕！请访问前端 Dashboard。")

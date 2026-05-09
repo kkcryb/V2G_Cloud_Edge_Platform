@@ -175,7 +175,8 @@ async def run_simulation_loop():
                     "step": step,
                     "actual_load": total_actual_load,
                     "actual_curve": actual_curve,
-                    "active_nodes": len(edge_node_powers)
+                    "active_nodes": len(edge_node_powers),
+                    "node_details": edge_node_powers
                 }
             })
 

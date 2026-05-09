@@ -49,6 +49,7 @@ export function initWebSocket(wsUrl = 'ws://127.0.0.1:8000/ws/dashboard') {
         ]);
         systemState.currentStep = data.payload.step;
         systemState.v2gProgress = data.payload.v2g_progress;
+        systemState.nodeDetails = data.payload.node_details;
         break;
 
       case 'PHASE_END_WRITEBACK':
