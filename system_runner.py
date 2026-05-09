@@ -20,7 +20,7 @@ class GlobalOrchestrator:
 
     def fetch_historical_data_from_hub(self):
         """1. 从数据中台拉取过去24小时的真实边缘执行数据"""
-        print("📊 [调度器] 正在从 Data Hub 提取过去 24 小时真实仿真负荷...")
+        print("[调度器] 正在从 Data Hub 提取过去 24 小时真实仿真负荷...")
         try:
             # 假设你的 Data Hub 运行在本地 8081 端口
             # 真实开发中，这里你需要从 API 拼装出 (275, 24) 的负荷矩阵
@@ -43,15 +43,15 @@ class GlobalOrchestrator:
         # 由于仿真器只回写了 power_kw，我们需要把其他的环境特征用静态数据补齐
 
         batch_size = 1
-        tensor_data = np.zeros((batch_size, config.SEQ_LEN, config.NUM_NODES, config.INPUT_DIM))
+        tensor_data = np.zeros((batch_size, config.SEQ_LEN, config.NUM_NODES, 2))
 
         for seq_idx in range(config.SEQ_LEN):
             for node_idx in range(config.NUM_NODES):
                 tensor_data[0, seq_idx, node_idx, 0] = historical_load[node_idx, seq_idx]  # 真实的负荷特征
                 tensor_data[0, seq_idx, node_idx, 1] = 0.6  # 默认电价补齐
-                tensor_data[0, seq_idx, node_idx, 2] = 0.5  # 默认占有率补齐
-                tensor_data[0, seq_idx, node_idx, 3] = 25.0  # 默认温度补齐
-                tensor_data[0, seq_idx, node_idx, 4] = 2.0  # 默认风速补齐
+                #tensor_data[0, seq_idx, node_idx, 2] = 0.5  # 默认占有率补齐
+                #tensor_data[0, seq_idx, node_idx, 3] = 25.0  # 默认温度补齐
+                #tensor_data[0, seq_idx, node_idx, 4] = 2.0  # 默认风速补齐
 
         return tensor_data
 
