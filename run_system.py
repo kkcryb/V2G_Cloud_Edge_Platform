@@ -155,12 +155,12 @@ async def run_simulation_loop():
                 "target": target_curve
             }
         })
-
+        await asyncio.sleep(3)
         # ==================================
         # 5分钟滚动追踪
         # ==================================
         for step in range(12):
-            await asyncio.sleep(2)
+            await asyncio.sleep(2.5)
 
             total_actual_load = round(sum(edge_node_powers.values()), 2)
             actual_curve.append([step, total_actual_load])

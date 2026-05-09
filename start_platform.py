@@ -16,9 +16,9 @@ def start_system():
         # 给云端服务几秒钟启动时间，确保 MQTT 监听已就绪
         time.sleep(3)
 
-        # 2. 启动边端仿真集群 (取代旧的 edge_simulation/main.py)
+        # 2. 启动边端仿真集群 (取代旧的 edge_simulation/data_hub.py)
         print("[2/2] 启动边端并发仿真集群...")
-        edge_proc = subprocess.Popen([sys.executable, "edge_simulation/main.py"])  # 运行包含 EdgeFleetSimulator 的 main.py
+        edge_proc = subprocess.Popen([sys.executable, "edge_simulation/data_hub.py"])  # 运行包含 EdgeFleetSimulator 的 data_hub.py
         processes.append(edge_proc)
 
         print("全系统启动完毕！请访问前端 Dashboard。")
