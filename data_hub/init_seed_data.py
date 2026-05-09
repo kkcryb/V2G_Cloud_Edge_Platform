@@ -8,7 +8,7 @@ import os
 
 
 def seed_database():
-    print("⏳ 开始进行冷启动仿真初始化，导入 UrbanEV 历史数据集...")
+    print("开始进行冷启动仿真初始化，导入 UrbanEV 历史数据集...")
 
     # 连接 InfluxDB
     client = InfluxDBClient(url=config.INFLUX_URL, token=config.INFLUX_TOKEN, org=config.INFLUX_ORG)
@@ -27,7 +27,7 @@ def seed_database():
     now = datetime.utcnow()
     points = []
 
-    print("📊 正在拼装时序数据点...")
+    print("正在拼装时序数据点...")
     for idx, row in df.head(5000).iterrows():  # 示例: 导入前5000条作为历史冷启动数据
         # 这里假设 df 有 node_id, power_kw 等字段
         # 实际你需要根据你的 volume.csv 列名来调整
@@ -54,7 +54,7 @@ def seed_database():
     if points:
         write_api.write(bucket=config.INFLUX_BUCKET_RAW, record=points)
 
-    print("✅ 数据冷启动初始化完成！AI预测层现在可以读取历史数据了。")
+    print("数据冷启动初始化完成！AI预测层现在可以读取历史数据了。")
     client.close()
 
 
