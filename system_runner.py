@@ -101,7 +101,7 @@ if __name__ == '__main__':
 
     if config.SIMULATION_MODE:
         # 单机仿真加速：不用等真的一个小时，直接连续跑3个调度周期
-        for i in range(3):
+        for i in range(24):
             orchestrator.run_hourly_dispatch()
             # 留出10秒时间给 EdgeSimulator 疯狂执行微观5分钟步长并回写数据库
             print("⏳ 等待边缘集群进行微观响应回写...")
