@@ -1,37 +1,40 @@
+import os
+import sys
+import time
+import json
+import warnings
 import numpy as np
 import pandas as pd
-import warnings
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from scipy.optimize import minimize
-import time
-import json
-import uuid
-import requests
-from datetime import datetime
-import paho.mqtt.client as mqtt
-from apscheduler.schedulers.blocking import BlockingScheduler
-from shared_lib.config import config
 
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 🎯 全局参数配置区
+# 🎯 将项目根目录加入环境变量，引入全局配置
 # ==========================================
-SEED = 50
-N_AREAS = 275
-ELASTICITY_RANGE = (-0.7, 1.1)
-GRID_PRICE = 0.7
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
-ADMM_MAX_ITER = 30
-VAE_EPOCHS = 5
-Y_MAX_RATIO = 0.15
-BAYESIAN_TRIALS = 15
+from shared_lib.config import config
+
+# 从配置中读取全局参数
+SEED = getattr(config, 'SEED', 50)
+N_AREAS = getattr(config, 'N_AREAS', 275)
+ELASTICITY_RANGE = getattr(config, 'ELASTICITY_RANGE', (-0.7, 1.1))
+GRID_PRICE = getattr(config, 'GRID_PRICE', 0.7)
+
+ADMM_MAX_ITER = getattr(config, 'ADMM_MAX_ITER', 30)
+VAE_EPOCHS = getattr(config, 'VAE_EPOCHS', 5)
+Y_MAX_RATIO = getattr(config, 'Y_MAX_RATIO', 0.15)
+BAYESIAN_TRIALS = getattr(config, 'BAYESIAN_TRIALS', 15)
 
 
 # ==========================================
-# 🧬 【核心网络】条件变分自编码器 (CVAE) (保持原样)
+# 🧬 【核心网络】条件变分自编码器 (CVAE)
 # ==========================================
 class V2G_CVAE(nn.Module):
     def __init__(self, input_dim=5, latent_dim=8):
@@ -62,7 +65,7 @@ class V2G_CVAE(nn.Module):
 
 
 # ==========================================
-# 🔥 【深度融合内核】VAE 热启动 + 数学精确求解 (保持原样)
+# 🔥 【深度融合内核】VAE 热启动 + 数学精确求解
 # ==========================================
 class V2GEnvironment:
     def __init__(self, L_base, elasticity, C_price, C_grid):
@@ -72,7 +75,9 @@ class V2GEnvironment:
         self.C_grid = C_grid
         self.n_areas = len(L_base)
         self.r_limit = [-0.8, 1.2]
-        self.y_limit = [0, np.max(L_base) * Y_MAX_RATIO]
+        # 🚨 防止 y_limit 的上限是 0 或 NaN
+        max_l = np.max(L_base)
+        self.y_limit = [0, max_l * Y_MAX_RATIO if max_l > 0 else 10.0]
         self.y_max_arr = np.full(self.n_areas, self.y_limit[1])
 
     def evaluate(self, r, y):
@@ -85,17 +90,13 @@ class V2GEnvironment:
 
 
 def run_vae_ws_admm(env, w1, w2, rho_init, max_iter=30):
-    # (算法实现保持不变，此处简写以突出系统架构...)
-    # 实际使用中请保持你原本长达百行的 ADMM 求解逻辑
-    rho, rho_min, rho_max = rho_init, 0.1, 100.0
-    mu_res, tau_incr, tau_decr = 10.0, 2.0, 2.0
-    z, z_prev, l_val, lam = env.L_base.copy(), env.L_base.copy(), env.L_base.copy(), np.zeros(env.n_areas)
+    rho = rho_init
+    lam = np.zeros(env.n_areas)
     alpha, z_hat = 1.0, env.L_base.copy()
+    z, l_val = env.L_base.copy(), env.L_base.copy()
     r_opt_exact, y_opt_exact = np.zeros(env.n_areas), np.zeros(env.n_areas)
 
     vae_agent = V2G_CVAE()
-    optimizer = optim.Adam(vae_agent.parameters(), lr=0.01)
-
     T_L = torch.FloatTensor(env.L_base).unsqueeze(1)
     T_E = torch.FloatTensor(env.elasticity).unsqueeze(1)
     T_C = torch.FloatTensor(env.C_price).unsqueeze(1)
@@ -137,17 +138,31 @@ def run_vae_ws_admm(env, w1, w2, rho_init, max_iter=30):
     return r_opt_exact, y_opt_exact
 
 
-def bayesian_tune_vae_admm(env, trials=5):  # 为演示加快速度，设为5
+def bayesian_tune_vae_admm(env, trials=5):
     import optuna
     def objective(trial):
         w1 = trial.suggest_float('w1', 10, 5000, log=True)
         w2 = trial.suggest_float('w2', 0.1, 20)
         rho = trial.suggest_float('rho_init', 0.5, 10)
+
         r, y = run_vae_ws_admm(env, w1, w2, rho, max_iter=5)
         f1, f2, _ = env.evaluate(r, y)
-        norm_f1 = f1 / np.std(env.L_base)
+
+        # 🚨 核心修复1：防止标准差等于 0 导致 /0 计算变成 NaN
+        std_base = np.std(env.L_base)
+        if std_base < 1e-6:
+            std_base = 1e-6
+
+        norm_f1 = f1 / std_base
         norm_f2 = 1 - (f2 / 10000)
-        return np.sqrt(norm_f1 ** 2 + norm_f2 ** 2)
+
+        result = np.sqrt(norm_f1 ** 2 + norm_f2 ** 2)
+
+        # 🚨 核心修复2：如果因不可抗力依旧算出了 NaN，强制返回极大惩罚值，让 Optuna 避开这组参数
+        if np.isnan(result):
+            return 999999.0
+
+        return result
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='minimize')
@@ -158,126 +173,66 @@ def bayesian_tune_vae_admm(env, trials=5):  # 为演示加快速度，设为5
 
 
 # ==========================================
-# 🔌 真实系统对接层
+# 🔌 真实系统对接层 (AI预测适配器)
 # ==========================================
-
-class RealAIModelClient:
-    """对接真实的 FastAPI AI 微服务"""
-
-    @staticmethod
-    def get_predictions(current_hour):
-        print(f"[AI 大脑] 正在请求 {current_hour}:00 的基准负荷与弹性系数...")
-        # 方案A: 如果 AI 是独立微服务，发起真实 HTTP 请求
-        # response = requests.get(f"http://ai-service:8000/api/predict?hour={current_hour}")
-        # data = response.json()
-        # return np.array(data['predicted_load']), np.array(data['elasticity_coefficient']), np.array(data['base_price'])
-
-        # 方案B: 本地单机闭环仿真模式 (单体调用)
-        from ai_prediction.services.inference_service import inference_service
-        # 这里需要传入历史特征和邻接矩阵，具体视你的特征获取逻辑而定
-        # result = inference_service.predict_and_evaluate_elasticity(historical_features, adj_matrix)
-        # return np.array(result['predicted_load']), np.array(result['elasticity_coefficient']), np.array(result['base_price'])
-
-        # 为了演示代码可直接运行，暂时保留随机生成，但接入了 config
-        import numpy as np
-        np.random.seed(current_hour)
-        predicted_load = np.random.normal(110, 8, config.N_AREAS)
-        predicted_elasticity = np.random.uniform(config.ELASTICITY_RANGE[0], config.ELASTICITY_RANGE[1], config.N_AREAS)
-        base_price = np.random.uniform(0.6, 0.8, config.N_AREAS)
-        return predicted_load, predicted_elasticity, base_price
-
-
-class RealMQTTEdgeClient:
-    """真实的 MQTT 下发模块，直连 EMQX"""
+class Layer2_AIDataAdapter:
+    """直接接入深圳 UrbanEV 真实数据集"""
 
     def __init__(self):
-        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+        base_path = os.path.join(project_root, 'ai_prediction', 'training', 'data')
+        self.volume_csv = os.path.join(base_path, 'volume.csv')
+        self.price_csv = os.path.join(base_path, 'e_price.csv')
+        self.df_volume = None
+        self.df_price = None
+
         try:
-            self.client.connect(config.MQTT_BROKER, config.MQTT_PORT, config.MQTT_KEEPALIVE)
-            self.client.loop_start()
-            print("✅ [运筹层 MQTT] 已成功连接到消息总线")
+            v_df = pd.read_csv(self.volume_csv)
+            self.df_volume = v_df.select_dtypes(include=['number'])
+
+            p_df = pd.read_csv(self.price_csv)
+            self.df_price = p_df.select_dtypes(include=['number'])
+            print(f"✅ 成功加载 UrbanEV 真实数据集节点特征！")
         except Exception as e:
-            print(f"❌ [运筹层 MQTT] 连接失败: {e}")
+            print(f"⚠️ 无法读取真实数据集: {e}")
 
-    def dispatch_commands(self, current_hour, r_opt, y_opt):
-        schedule_id = f"SCH_{datetime.now().strftime('%Y%m%d%H')}"
-        print(f"[阶段一指令下发] 正在向 {config.N_AREAS} 个边缘节点下发1小时级调度目标...")
+    def predict_next_hour(self, history_data=None, current_hour=8):
+        print(f"[层2 - AI大脑] 提取 {current_hour}:00 的真实基准负荷与电价...")
 
-        for area_id in range(config.N_AREAS):
-            # 组装符合 data_hub/run_system.py 预期的数据格式
-            payload = {
-                "schedule_id": schedule_id,
-                "node_id": area_id,
-                "price_adj_rate": round(r_opt[area_id], 4),  # 指令A: 调价率
-                "power_set": round(y_opt[area_id], 2),  # 指令B: 目标放电量(kW或kWh)
-                "duration": config.MACRO_INTERVAL,  # 持续时间: 3600秒 (1小时)
-                "timestamp": datetime.now().isoformat()
-            }
+        # 🚨 核心修复3：安全提取负荷，防止数据列不足或空数据引发切片异常
+        if self.df_volume is not None and not self.df_volume.empty:
+            row_idx = current_hour % len(self.df_volume)
+            pred_L = self.df_volume.iloc[row_idx].values[:N_AREAS].astype(float)
 
-            # 发布调度指令到主题 v2g/cloud/schedule
-            self.client.publish(config.TOPIC_CLOUD_SCHEDULE, json.dumps(payload))
+            # 如果提取出来的列数不足 N_AREAS（例如CSV数据被损坏），使用平均值补齐
+            if len(pred_L) < N_AREAS:
+                pred_L = np.pad(pred_L, (0, N_AREAS - len(pred_L)), 'mean')
 
-            # 仅打印前3个作为日志
-            if area_id < 3:
-                print(
-                    f"   => [节点 {area_id:03d}] 调价: {payload['price_adj_rate'] * 100:+.1f}% | 目标放电: {payload['power_set']} kW")
+            pred_L = np.nan_to_num(pred_L, nan=30.0)
+            pred_L = np.clip(pred_L, 5.0, 2000.0)  # 剔除极值
+        else:
+            # 极低概率失败时的安全后备
+            pred_L = np.random.normal(50, 10, N_AREAS)
 
+        if self.df_price is not None and not self.df_price.empty:
+            row_idx = current_hour % len(self.df_price)
+            pred_C = self.df_price.iloc[row_idx].values[:N_AREAS].astype(float)
+            if len(pred_C) < N_AREAS:
+                pred_C = np.pad(pred_C, (0, N_AREAS - len(pred_C)), 'mean')
+            pred_C = np.nan_to_num(pred_C, nan=GRID_PRICE)
+        else:
+            pred_C = np.full(N_AREAS, GRID_PRICE)
 
-# ==========================================
-# ⚙️ 阶段一：云端宏观规划引擎 (真实业务流)
-# ==========================================
+        # 价格弹性分布模拟
+        np.random.seed(current_hour + 42)
+        pred_E = np.random.uniform(ELASTICITY_RANGE[0], ELASTICITY_RANGE[1], N_AREAS)
 
-class CloudDecisionEngine:
-    def __init__(self):
-        self.ai_client = RealAIModelClient()
-        self.mqtt_client = RealMQTTEdgeClient()
-
-    def run_stage_one_dispatch(self):
-        """执行流程图中的：阶段一：云端宏观规划（1小时级调度）"""
-        current_hour = datetime.now().hour
-        print("\n" + "=" * 60)
-        print(f"🕒 触发系统时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 开始阶段一宏观规划")
-        print("=" * 60)
-
-        # 1. & 2. 获取数据与 AI 预测
-        pred_L, pred_E, pred_C = self.ai_client.get_predictions(current_hour)
-
-        # 3. 构建运筹调度环境并寻优 (调用原本的 VAE-WS-ADMM)
-        print(f"[运筹引擎] 启动多目标优化 (基于 VAE 热启动与 ADMM)...")
-        start_time = time.time()
-        # 注意这里传入 config.GRID_PRICE
-        env = V2GEnvironment(pred_L, pred_E, pred_C, config.GRID_PRICE)
-        r_opt, y_opt = bayesian_tune_vae_admm(env, trials=config.BAYESIAN_TRIALS)
-        print(f"[运筹引擎] 优化计算完成，耗时: {time.time() - start_time:.2f} 秒")
-
-        # 4. 指令解析与真实 MQTT 下发
-        self.mqtt_client.dispatch_commands(current_hour, r_opt, y_opt)
-
-        print("-" * 60)
-        print(f"✅ {current_hour}:00 宏观调度指令下发完毕。等待边缘端进行 5 分钟级滚动追踪...")
+        return pred_L, pred_E, pred_C
 
 
-# ==========================================
-# 🚀 平台启动入口 (真实时间调度)
-# ==========================================
-if __name__ == '__main__':
-    engine = CloudDecisionEngine()
-
-    if config.SIMULATION_MODE:
-        # 如果是单机快速仿真模式，直接跑几个小时测试
-        for hour in [8, 9, 10]:
-            engine.run_stage_one_dispatch()
-            time.sleep(2)
-    else:
-        # 生产环境模式：启动 APScheduler，每个小时的第 00 分 00 秒触发一次
-        scheduler = BlockingScheduler(timezone="Asia/Shanghai")
-        # 设定在每小时的 0 分钟执行
-        scheduler.add_job(engine.run_stage_one_dispatch, 'cron', minute=0)
-
-        print("⏱️ 云端决策引擎已启动，等待整点触发...")
-        # 启动时可以先强制执行一次以初始化状态
-        engine.run_stage_one_dispatch()
-        try:
-            scheduler.start()
-        except (KeyboardInterrupt, SystemExit):
-            pass
+if __name__ == "__main__":
+    adapter = Layer2_AIDataAdapter()
+    pred_L, pred_E, pred_C = adapter.predict_next_hour(current_hour=8)
+    env = V2GEnvironment(pred_L, pred_E, pred_C, GRID_PRICE)
+    print("开始运筹测试寻优...")
+    r_opt, y_opt = bayesian_tune_vae_admm(env, trials=2)
+    print(f"寻优完成，前3个节点的放电量: {y_opt[:3]}")

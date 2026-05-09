@@ -3,35 +3,30 @@
     <div class="panel-header">
       <div>
         <h3 class="panel-title">
-          📉 5分钟级滚动追踪
-          <span class="sub-title">
-            （云端宏观规划 vs 边端微观执行）
-          </span>
+          5分钟级滚动追踪
+          <span class="sub-title">（云端宏观规划 vs 边端微观执行）</span>
         </h3>
-
         <div class="term-explanations">
-          <span title="GCN-LSTM预测得到的无控制自然负荷">❓ AI预测基线</span> |
-          <span title="云端VAE-WS-ADMM计算的未来1小时优化目标">❓ 运筹规划目标</span> |
-          <span title="边缘节点每5分钟执行MQTT控制后的真实负荷">❓ 实际执行轨迹</span> |
-          <span title="实际执行与目标轨迹之间的误差">❓ Tracking Error</span>
+          <span title="GCN-LSTM预测得到的无控制自然负荷">AI预测基线</span> |
+          <span title="云端VAE-WS-ADMM计算的未来1小时优化目标">运筹规划目标</span> |
+          <span title="边缘节点每5分钟执行MQTT控制后的真实负荷">实际执行轨迹</span> |
+          <span title="实际执行与目标轨迹之间的误差">Tracking Error</span>
         </div>
       </div>
 
       <div class="status-box">
         <div class="status-item">
-          <span class="dot online"></span>
-          边端在线
+          <span class="dot online"></span> 边端在线
         </div>
         <div class="status-item">
           当前步长：<strong>{{ currentStep }}</strong>
         </div>
-
         <div class="node-selector-wrapper">
           <label for="node-select">追踪维度：</label>
           <select id="node-select" v-model="selectedNodeId" @change="handleNodeChange">
-            <option value="ALL">🌐 全网聚合总负荷</option>
+            <option value="ALL">全网聚合总负荷</option>
             <option v-for="i in 275" :key="i-1" :value="String(i-1)">
-              📍 区域节点 {{ i-1 }}
+              区域节点 [ID: {{ i-1 }}]
             </option>
           </select>
         </div>
@@ -45,20 +40,22 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as echarts from 'echarts';
-import { systemState } from '../store/wsStore'; // 确保路径正确
+import { systemState } from '../store/wsStore';
 
 const chartRef = ref(null);
 let chartInstance = null;
 
-// 状态变量
 const currentStep = ref(0);
 const selectedNodeId = ref('ALL');
-const singleNodeCurve = ref([]); // 专用于存储选定节点的当前小时轨迹
-const N_AREAS = 275; // 系统总节点数
+const singleNodeCurve = ref([]);
+const N_AREAS = 275;
 
-/**
- * 安全数据格式化，统一转为 [[x,y], ...]
- */
+// 核心修复：深拷贝工具 (剥离 Vue Proxy 防止 ECharts 渲染失败)
+const deepClone = (obj) => {
+  if (!obj) return [];
+  return JSON.parse(JSON.stringify(obj));
+};
+
 const formatToCoordinates = (arr = []) => {
   if (!Array.isArray(arr)) return [];
   if (Array.isArray(arr[0])) {
@@ -69,9 +66,6 @@ const formatToCoordinates = (arr = []) => {
   return arr.filter(v => Number.isFinite(v)).map((val, idx) => [idx, val]);
 };
 
-/**
- * Tracking Error: actual - target
- */
 const computeErrorArea = (actual, target) => {
   const result = [];
   const len = Math.min(actual.length, target.length);
@@ -85,17 +79,13 @@ const computeErrorArea = (actual, target) => {
   return result;
 };
 
-/**
- * 切换节点时的处理
- */
 const handleNodeChange = () => {
-  singleNodeCurve.value = []; // 清空历史轨迹
+  singleNodeCurve.value = [];
   if (chartInstance) {
-    chartInstance.clear(); // 清理画布残影
-    initChart();           // 重新加载配置
+    chartInstance.clear();
+    initChart();
   }
 
-  // 如果切换时已经有当前步长的数据，立刻将这一帧塞入数组中
   if (selectedNodeId.value !== 'ALL' && systemState.nodeDetails) {
     const pwr = systemState.nodeDetails[selectedNodeId.value] || 0;
     singleNodeCurve.value.push([currentStep.value, pwr]);
@@ -104,9 +94,6 @@ const handleNodeChange = () => {
   updateChart();
 };
 
-/**
- * 初始化图表配置
- */
 const initChart = () => {
   if (!chartRef.value) return;
   if (!chartInstance) {
@@ -156,43 +143,38 @@ const initChart = () => {
     legend: { top: 0, textStyle: { color: '#ccc' }, data: ['AI预测基线', '运筹规划目标', '实际执行轨迹', 'Tracking Error'] },
     grid: { left: '4%', right: '4%', bottom: '8%', top: '16%', containLabel: true },
     xAxis: { type: 'value', name: '5分钟步长', min: 0, max: value => Math.max(11, value.max), axisLine: { lineStyle: { color: '#666' } }, axisLabel: { color: '#aaa', formatter: val => `T${val}` }, splitLine: { lineStyle: { color: '#222' } } },
-    yAxis: { type: 'value', name: selectedNodeId.value === 'ALL' ? '全网聚合负荷 (kW)' : '单节点负荷 (kW)', nameTextStyle: { color: '#aaa' }, axisLine: { lineStyle: { color: '#666' } }, axisLabel: { color: '#aaa' }, splitLine: { lineStyle: { color: '#333', type: 'dashed' } } },
+    yAxis: { type: 'value', scale: true, name: selectedNodeId.value === 'ALL' ? '全网聚合负荷 (kW)' : '单站负荷 (kW)', nameTextStyle: { color: '#aaa' }, axisLine: { lineStyle: { color: '#666' } }, axisLabel: { color: '#aaa' }, splitLine: { lineStyle: { color: '#333', type: 'dashed' } } },
     series: [
       { id: 'baseline', name: 'AI预测基线', type: 'line', smooth: true, showSymbol: false, z: 1, lineStyle: { color: '#777', width: 2, type: 'dashed' }, areaStyle: { color: 'rgba(120,120,120,0.06)' }, data: [] },
       { id: 'target', name: '运筹规划目标', type: 'line', smooth: true, showSymbol: false, z: 3, lineStyle: { color: '#00fa9a', width: 4 }, emphasis: { focus: 'series' }, data: [] },
-      { id: 'actual', name: '实际执行轨迹', type: 'line', smooth: true, z: 5, showSymbol: true, symbol: 'circle', symbolSize: val => (val[0] === currentStep.value ? 10 : 5), lineStyle: { color: '#ff4500', width: 3 }, itemStyle: { color: '#ff4500' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(255,69,0,0.28)' }, { offset: 1, color: 'rgba(255,69,0,0)' }]) }, data: [] },
+      { id: 'actual', name: '实际执行轨迹', type: 'line', smooth: true, z: 5, showSymbol: true, symbol: 'circle', symbolSize: val => (val && val.length > 0 && val[0] === currentStep.value ? 10 : 5), lineStyle: { color: '#ff4500', width: 3 }, itemStyle: { color: '#ff4500' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(255,69,0,0.28)' }, { offset: 1, color: 'rgba(255,69,0,0)' }]) }, data: [] },
       { id: 'error', name: 'Tracking Error', type: 'bar', z: 0, barWidth: 10, itemStyle: { color: params => (Math.abs(params.value[1]) > (selectedNodeId.value === 'ALL' ? 5 : 0.5) ? '#ff4500' : '#00bfff'), opacity: 0.35 }, data: [] }
     ]
   };
   chartInstance.setOption(option);
 };
 
-/**
- * 更新图表数据
- */
 const updateChart = () => {
   if (!chartInstance) return;
 
   const isAll = selectedNodeId.value === 'ALL';
 
-  let baseline = formatToCoordinates(systemState.baselineCurve);
-  let target = formatToCoordinates(systemState.cloudTargetCurve);
+  let baseline = formatToCoordinates(deepClone(systemState.baselineCurve));
+  let target = formatToCoordinates(deepClone(systemState.cloudTargetCurve));
   let actual = [];
 
   if (isAll) {
-    actual = formatToCoordinates(systemState.actualLoadCurve);
+    actual = formatToCoordinates(deepClone(systemState.actualLoadCurve));
   } else {
-    // 🚨 核心逻辑：如果是单节点模式，宏观目标需要除以 275 缩小比例，才能在同一个数量级对比
     baseline = baseline.map(pt => [pt[0], pt[1] / N_AREAS]);
     target = target.map(pt => [pt[0], pt[1] / N_AREAS]);
-    actual = singleNodeCurve.value;
+    actual = deepClone(singleNodeCurve.value);
   }
 
   const errorData = computeErrorArea(actual, target);
 
-  // 动态更新 Y 轴名称
   chartInstance.setOption({
-    yAxis: { name: isAll ? '全网聚合负荷 (kW)' : `节点 ${selectedNodeId.value} 负荷 (kW)` },
+    yAxis: { name: isAll ? '全网聚合负荷 (kW)' : '单站实际负荷 (kW)' },
     series: [
       { id: 'baseline', data: baseline },
       { id: 'target', data: target },
@@ -216,30 +198,24 @@ onUnmounted(() => {
   chartInstance = null;
 });
 
-/**
- * 监听 WebSocket 状态变化
- */
 watch(
   () => systemState.actualLoadCurve,
-  (newCurve) => {
-    // 1. 如果云端清空了轨迹，说明进入了全新的 1 小时大周期
-    if (!newCurve || newCurve.length === 0) {
+  () => {
+    const curve = deepClone(systemState.actualLoadCurve);
+
+    if (!curve || curve.length === 0) {
       singleNodeCurve.value = [];
       currentStep.value = 0;
       updateChart();
       return;
     }
 
-    // 2. 提取最新步长
-    const latestData = newCurve[newCurve.length - 1];
+    const latestData = curve[curve.length - 1];
     const step = latestData[0];
     currentStep.value = step;
 
-    // 3. 拦截单节点数据并拼装
     if (selectedNodeId.value !== 'ALL' && systemState.nodeDetails) {
       const currentPower = systemState.nodeDetails[selectedNodeId.value] || 0;
-
-      // 防止 Vue 多次触发 watch 导致同一个 step 被塞入两次
       const lastSavedStep = singleNodeCurve.value.length > 0
         ? singleNodeCurve.value[singleNodeCurve.value.length - 1][0]
         : -1;
@@ -254,88 +230,25 @@ watch(
   { deep: true }
 );
 
-// 同时监听云端目标变化（处理新一轮优化下发时的情况）
-watch(() => systemState.cloudTargetCurve, updateChart);
+watch(() => systemState.cloudTargetCurve, updateChart, { deep: true });
 </script>
 
 <style scoped>
-.component-wrapper {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-}
-
-/* Header */
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 8px;
-}
-
-.panel-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: #00bfff;
-}
-
+.component-wrapper { display: flex; flex-direction: column; height: 100%; width: 100%; }
+.panel-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.panel-title { margin: 0; font-size: 1rem; font-weight: 600; color: #00bfff; }
 .sub-title { font-size: 0.82rem; color: #888; font-weight: 400; }
 .term-explanations { margin-top: 4px; font-size: 0.74rem; color: #888; }
 .term-explanations span { cursor: help; border-bottom: 1px dotted #555; transition: 0.2s; }
 .term-explanations span:hover { color: #ddd; }
-
-/* Status & Select */
-.status-box {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  font-size: 0.75rem;
-  color: #aaa;
-}
-
+.status-box { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; font-size: 0.75rem; color: #aaa; }
 .status-item { display: flex; align-items: center; gap: 6px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; }
 .online { background: #00fa9a; box-shadow: 0 0 8px #00fa9a; }
-
-/* 🚨 新增：下拉选择框样式 */
-.node-selector-wrapper {
-  background: rgba(30, 30, 30, 0.8);
-  border: 1px solid #444;
-  padding: 4px 8px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-}
-
-.node-selector-wrapper label {
-  color: #888;
-  margin-right: 6px;
-}
-
-.node-selector-wrapper select {
-  background: transparent;
-  color: #00bfff;
-  border: none;
-  font-size: 0.8rem;
-  font-weight: bold;
-  outline: none;
-  cursor: pointer;
-}
-
-.node-selector-wrapper select option {
-  background: #222;
-  color: #eee;
-}
-
-/* Chart */
+.node-selector-wrapper { background: rgba(30, 30, 30, 0.8); border: 1px solid #444; padding: 4px 8px; border-radius: 4px; display: flex; align-items: center; }
+.node-selector-wrapper label { color: #888; margin-right: 6px; }
+.node-selector-wrapper select { background: transparent; color: #00bfff; border: none; font-size: 0.8rem; font-weight: bold; outline: none; cursor: pointer; }
+.node-selector-wrapper select option { background: #222; color: #eee; }
 .echarts-container { flex: 1; min-height: 300px; }
-
-/* Responsive */
-@media (max-width: 900px) {
-  .panel-header { flex-direction: column; gap: 10px; }
-  .status-box { align-items: flex-start; }
-}
+@media (max-width: 900px) { .panel-header { flex-direction: column; gap: 10px; } .status-box { align-items: flex-start; } }
 </style>
