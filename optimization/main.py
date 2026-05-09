@@ -204,7 +204,7 @@ class RealMQTTEdgeClient:
         print(f"[阶段一指令下发] 正在向 {config.N_AREAS} 个边缘节点下发1小时级调度目标...")
 
         for area_id in range(config.N_AREAS):
-            # 组装符合 data_hub/main.py 预期的数据格式
+            # 组装符合 data_hub/run_system.py 预期的数据格式
             payload = {
                 "schedule_id": schedule_id,
                 "node_id": area_id,
