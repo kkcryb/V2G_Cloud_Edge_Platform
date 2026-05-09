@@ -52,17 +52,6 @@ body {
   border: 1px solid var(--border-color);
 }
 
-.status-indicator span.online {
-  color: var(--accent-green);
-  font-weight: bold;
-  text-shadow: 0 0 5px var(--accent-green);
-}
-
-.status-indicator span.offline {
-  color: var(--accent-orange);
-  font-weight: bold;
-}
-
 .grid-container {
   display: flex;
   flex-direction: column;
