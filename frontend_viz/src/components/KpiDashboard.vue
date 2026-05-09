@@ -1,29 +1,28 @@
 <template>
   <div class="component-wrapper">
-    <h3 class="panel-title">调度综合效能评估</h3>
+    <h3 class="panel-title">🎯 真实效能评估 (Real-time Metrics)</h3>
 
     <div class="kpi-content">
-      <!-- V2G 进度条 -->
-      <div class="kpi-block">
-        <div class="kpi-label">当前小时 V2G 任务完成度</div>
-        <div class="progress-bar-bg">
-          <div class="progress-bar-fill" :style="{ width: systemState.v2gProgress + '%' }"></div>
-        </div>
-        <div class="kpi-value highlight">{{ systemState.v2gProgress.toFixed(1) }}%</div>
+      <div class="stat-card">
+        <div class="stat-title">当前周期 V2G 任务完成度</div>
+        <div class="stat-num blue">{{ systemState.v2gProgress.toFixed(1) }}%</div>
+        <div class="stat-desc">边缘集群实际放电量 / 云端宏观目标放电量</div>
       </div>
 
-      <!-- 纯 CSS 数字展示卡片 -->
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-title">综合绿电消纳率</div>
-          <div class="stat-num green">{{ systemState.greenEnergyRate.toFixed(2) }}%</div>
-          <div class="stat-desc">目标: > 85%</div>
-        </div>
+      <div class="stat-card">
+        <div class="stat-title">动态微观偏差 (实时 MAE)</div>
+        <div class="stat-num orange">{{ realTimeMAE }} kW</div>
+        <div class="stat-desc">实际追踪负荷与云端目标的平均绝对误差</div>
+      </div>
 
-        <div class="stat-card">
-          <div class="stat-title">当前周期运行成本</div>
-          <div class="stat-num blue">¥ {{ systemState.totalCost.toFixed(2) }}</div>
-          <div class="stat-desc">包含电池损耗折旧</div>
+      <div class="stats-row">
+        <div class="stat-sub-card">
+          <div class="stat-title">绿电消纳率</div>
+          <div class="stat-num green">{{ systemState.greenEnergyRate || 0 }}%</div>
+        </div>
+        <div class="stat-sub-card">
+          <div class="stat-title">运行成本节约</div>
+          <div class="stat-num green">¥ {{ systemState.totalCost || 0 }}</div>
         </div>
       </div>
     </div>
@@ -31,80 +30,51 @@
 </template>
 
 <script setup>
+import { computed } from 'vue';
 import { systemState } from '../store/wsStore';
+
+// 【核心逻辑】：绝不捏造 MAE 误差数据，直接根据已发生的步数进行严格数学计算
+const realTimeMAE = computed(() => {
+  const actuals = systemState.actualLoadCurve;
+  const targets = systemState.cloudTargetCurve;
+
+  if (!actuals || actuals.length === 0 || !targets || targets.length === 0) return '0.00';
+
+  let errorSum = 0;
+  let count = 0;
+
+  actuals.forEach(point => {
+    const step = point[0];      // x轴的步长
+    const actualLoad = point[1];// 真实负荷
+    // 确保目标的索引存在
+    if (targets[step] !== undefined) {
+      const targetLoad = targets[step];
+      errorSum += Math.abs(actualLoad - targetLoad);
+      count++;
+    }
+  });
+
+  return count > 0 ? (errorSum / count).toFixed(2) : '0.00';
+});
 </script>
 
 <style scoped>
-.component-wrapper {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-.panel-title {
-  font-size: 1rem;
-  color: var(--text-muted);
-  margin-bottom: 20px;
-  font-weight: normal;
-}
-.kpi-content {
-  display: flex;
-  flex-direction: column;
-  gap: 30px;
-  flex: 1;
-}
-.kpi-block {
+.component-wrapper { display: flex; flex-direction: column; height: 100%; }
+.panel-title { font-size: 1rem; color: #ff8c00; margin-bottom: 15px; font-weight: 500; }
+.kpi-content { display: flex; flex-direction: column; gap: 15px; flex: 1; }
+.stat-card, .stat-sub-card {
   background: rgba(255,255,255,0.03);
-  padding: 15px;
+  border: 1px solid rgba(255,255,255,0.05);
   border-radius: 8px;
-}
-.kpi-label {
-  font-size: 0.9rem;
-  margin-bottom: 10px;
-}
-.progress-bar-bg {
-  width: 100%;
-  height: 12px;
-  background: #333;
-  border-radius: 6px;
-  overflow: hidden;
-  margin-bottom: 10px;
-}
-.progress-bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #ff8c00, #ff4500);
-  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.kpi-value.highlight {
-  font-size: 1.5rem;
-  font-weight: bold;
-  color: #ff4500;
-  text-align: right;
-}
-.stats-grid {
-  display: flex;
-  gap: 15px;
-}
-.stat-card {
-  flex: 1;
-  background: rgba(255,255,255,0.03);
   padding: 15px;
-  border-radius: 8px;
-  text-align: center;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
 }
-.stat-title {
-  font-size: 0.85rem;
-  color: #aaa;
-  margin-bottom: 10px;
-}
-.stat-num {
-  font-size: 1.8rem;
-  font-weight: bold;
-  margin-bottom: 5px;
-}
-.stat-num.green { color: var(--accent-green); }
-.stat-num.blue { color: var(--accent-blue); }
-.stat-desc {
-  font-size: 0.75rem;
-  color: #666;
-}
+.stats-row { display: flex; gap: 15px; }
+.stat-sub-card { flex: 1; padding: 10px; }
+.stat-title { font-size: 0.85rem; color: #aaa; margin-bottom: 5px; }
+.stat-desc { font-size: 0.7rem; color: #666; margin-top: 5px; text-align: center;}
+.stat-num { font-size: 1.8rem; font-weight: bold; font-family: monospace; }
+.stat-num.green { color: #00fa9a; }
+.stat-num.orange { color: #ff8c00; }
+.stat-num.blue { color: #1e90ff; }
 </style>
