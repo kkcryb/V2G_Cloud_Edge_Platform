@@ -48,6 +48,7 @@ onMounted(() => {
     yAxis: {
       type: 'value',
       name: '功率 (kW)',
+      scale: true, // 🚨 修复3: 关键！允许Y轴不从0开始，根据实际功率波动自适应放大！
       nameTextStyle: { color: '#888' },
       splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
       axisLabel: { color: '#aaa' }
@@ -82,21 +83,27 @@ onMounted(() => {
   window.addEventListener('resize', () => chartInstance.resize());
 });
 
-watch([() => systemState.cloudBaselineCurve, () => systemState.actualCurve, selectedNodeId], ([baseline, actual]) => {
+// 监听数据变化
+watch([() => systemState.baselineCurve, () => systemState.actualLoadCurve, selectedNodeId], ([baseline, actual]) => {
   if (chartInstance) {
-    // 假设云端下发的数据存放在 systemState 中
-    // 如果是单节点追踪，需要你在 run_system.py 中把单节点数据也推送到前端
-    const baselineData = baseline || [];
-    const actualData = actual ? actual.map(item => item[1]) : [];
+    // 修复1: 使用展开语法 [...] 彻底解除 Vue3 Proxy 代理，防止 Echarts 静默崩溃
+    const rawBaseline = baseline ? [...baseline] : [];
+    const rawActual = actual ? [...actual] : [];
+
+    // 修复2: 强制补齐 12 个步长的数组，没有数据的位置用 null 占位，避免残留旧折线
+    const safeBaseline = Array.from({ length: 12 }, (_, i) => rawBaseline[i] ?? null);
+    const safeActual = Array.from({ length: 12 }, (_, i) => rawActual[i] ?? null);
 
     chartInstance.setOption({
+      // 动态注入 Y轴缩放，即使数据断崖下跌也能看清波动
+      yAxis: { scale: true },
       series: [
-        { data: baselineData },
-        { data: actualData }
+        { data: safeBaseline },
+        { data: safeActual }
       ]
     });
   }
-}, { deep: true });
+}, { deep: true, immediate: true });
 </script>
 
 <style scoped>

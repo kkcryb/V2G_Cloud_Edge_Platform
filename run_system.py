@@ -158,9 +158,31 @@ async def run_simulation_loop():
         loop = asyncio.get_running_loop()
         pred_L, pred_E, pred_C, r_opt, y_opt = await loop.run_in_executor(None, compute_backend)
 
-        # 3. 格式化数据准备发给前端 (截取12个步长，并转换为安全的普通列表)
-        baseline_curve = safe_list(pred_L[:12])
-        target_curve = safe_list((pred_L - y_opt)[:12])
+        # ==========================================
+        # 🚨 核心修复 1：下发 MQTT 指令，唤醒边端集群！
+        # ==========================================
+        for i in range(len(pred_L)):
+            cmd_payload = {
+                "node_id": str(i),
+                "power_set": float(y_opt[i] if not np.isnan(y_opt[i]) else 0.0),
+                "price_adj_rate": float(r_opt[i] if not np.isnan(r_opt[i]) else 0.0),
+                "duration": 3600,
+                "base_load": float(pred_L[i] if not np.isnan(pred_L[i]) else 50.0)
+            }
+            mqtt_client.publish(config.TOPIC_CLOUD_SCHEDULE, json.dumps(cmd_payload))
+
+        print(f"📡 已通过 MQTT 向 {len(pred_L)} 个边缘节点下发控制指令，边缘集群已激活！")
+
+        # ==========================================
+        # 🚨 核心修复 2：修复前端图表量级不匹配导致的崩溃
+        # ==========================================
+        # 计算全网 275 个节点的真实“总基线负荷”和“总目标负荷”
+        total_base_load = float(np.nansum(pred_L))
+        total_target_load = float(np.nansum(pred_L - y_opt))
+
+        # 将整小时的系统“总负荷”平铺到 12 个 5 分钟步长中
+        baseline_curve = [total_base_load] * 12
+        target_curve = [total_target_load] * 12
         node_status = safe_list(y_opt)  # 提取每个节点的放电目标，供地图渲染
 
         # 4. 【补全1】发送初始化拓扑，唤醒地图
@@ -182,17 +204,24 @@ async def run_simulation_loop():
         await asyncio.sleep(3)
 
         # 5分钟滚动追踪闭环
-        total_target_kwh = sum(target_curve)  # 本小时目标总放电量
+        total_target_kwh = total_target_load  # 本小时目标总负荷量
         accumulated_load = 0
+
+        global actual_curve  # 声明使用全局变量
+        actual_curve.clear()  # 🚀 修复1: 每小时开始前清空轨迹数组
 
         for step in range(12):
             await asyncio.sleep(2.5)  # 仿真加速间隔
 
+            # 获取所有唤醒节点的实际负荷总和
             total_actual_load = round(sum(edge_node_powers.values()), 2)
+            if total_actual_load == 0:
+                print(f"⚠️ 警告！当前聚合负荷为 0！请检查边端 edge.py 是否正在运行！")
             accumulated_load += total_actual_load
+            actual_curve.append(total_actual_load)  # 🚀 修复2: 将当前步长负荷加入数组
 
-            # 【补全3】计算 V2G 进度百分比，供 KPI 仪表盘显示
-            current_progress = min((accumulated_load / (total_target_kwh + 1e-5)) * 100, 100)
+            # 计算 V2G 进度百分比，供 KPI 仪表盘显示
+            current_progress = min((accumulated_load / (total_target_kwh * 12 + 1e-5)) * 100, 100)
 
             print(f"Step={step} 聚合实际负荷={total_actual_load} kW (活跃节点:{len(edge_node_powers)})")
 
@@ -202,6 +231,7 @@ async def run_simulation_loop():
                     "timestamp": f"{hour_counter:02d}:{step * 5:02d}",
                     "step": step,
                     "actual_load": total_actual_load,
+                    "actual_curve": actual_curve,
                     "v2g_progress": current_progress  # KPI 仪表盘依赖此字段
                 }
             })
