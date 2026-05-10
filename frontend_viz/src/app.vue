@@ -1,64 +1,64 @@
 <template>
-  <div class="dashboard-root">
-    <header class="header">
-      <h1>云边协同 V2G 控制平台</h1>
-      <div class="status-indicator">
-        数据链路状态:
-        <span :class="systemState.isConnected ? 'online' : 'offline'">
-          {{ systemState.isConnected ? '仿真运行中' : '等待连接...' }}
-        </span>
-      </div>
-    </header>
+  <div class="dashboard-container">
+    <div class="panel-left">
+      <LoadTracker />
+    </div>
 
-    <main class="grid-container">
-      <div class="top-row">
-        <!-- 空间维度与 KPI -->
-        <MapHeatmap class="grid-item"/>
-        <KpiDashboard class="grid-item"/>
-      </div>
-      <div class="bottom-row">
-        <!-- 时间维度闭环追踪 -->
-        <LoadTracker class="grid-item full-width"/>
-      </div>
-    </main>
+    <div class="panel-center">
+      <MapHeatmap />
+    </div>
+
+    <div class="panel-right">
+      <KpiDashboard />
+    </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted } from 'vue';
-import { systemState, initWebSocket } from './store/wsStore';
-import MapHeatmap from './components/MapHeatmap.vue';
 import LoadTracker from './components/LoadTracker.vue';
-import KpiDashboard from './components/KpiDashboard.vue'; // KPI 组件结构类似，展示 progress 和 cost
-
-onMounted(() => {
-  // 组件挂载即发起 WebSocket 连接，实现“一键运行”的数据贯通
-  initWebSocket('ws://127.0.0.1:8000/ws/dashboard');
-});
+import MapHeatmap from './components/MapHeatmap.vue';
+import KpiDashboard from './components/KpiDashboard.vue';
+// 确保在 main.js 或此处初始化你的 WebSocket 监听
 </script>
 
 <style>
-/* 简单的深色网格布局体系 */
-.dashboard-root {
-  background-color: #101014;
-  color: #fff;
-  min-height: 100vh;
-  padding: 20px;
+/* 全局充斥科技感深色底色 */
+body, html {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #050b14; /* 极深蓝底色 */
+  color: #e0e0e0;
   font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  overflow: hidden;
 }
-.header {
+
+.dashboard-container {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid #333;
-  padding-bottom: 10px;
-  margin-bottom: 20px;
+  width: 100vw;
+  height: 100vh;
+  box-sizing: border-box;
+  padding: 15px;
+  gap: 15px;
 }
-.status-indicator span { font-weight: bold; }
-.online { color: #00fa9a; }
-.offline { color: #ff4500; }
-.grid-container { display: flex; flex-direction: column; gap: 20px; }
-.top-row { display: flex; gap: 20px; }
-.grid-item { flex: 1; background: #1a1a24; border-radius: 8px; padding: 15px; }
-.full-width { flex: 100%; }
+
+.panel-left, .panel-right {
+  width: 25%;
+  background: rgba(10, 20, 40, 0.7);
+  border: 1px solid rgba(0, 234, 255, 0.2);
+  box-shadow: 0 0 20px rgba(0, 234, 255, 0.05) inset;
+  border-radius: 8px;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+
+.panel-center {
+  width: 50%;
+  position: relative;
+  background: radial-gradient(circle at center, rgba(10, 20, 40, 0) 0%, rgba(5, 11, 20, 1) 100%);
+  border-radius: 8px;
+}
 </style>

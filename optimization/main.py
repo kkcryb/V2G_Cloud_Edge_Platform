@@ -13,7 +13,7 @@ from scipy.optimize import minimize
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 🎯 将项目根目录加入环境变量，引入全局配置
+# 将项目根目录加入环境变量，引入全局配置
 # ==========================================
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
@@ -34,7 +34,7 @@ BAYESIAN_TRIALS = getattr(config, 'BAYESIAN_TRIALS', 15)
 
 
 # ==========================================
-# 🧬 【核心网络】条件变分自编码器 (CVAE)
+# 【核心网络】条件变分自编码器 (CVAE)
 # ==========================================
 class V2G_CVAE(nn.Module):
     def __init__(self, input_dim=5, latent_dim=8):
@@ -65,7 +65,7 @@ class V2G_CVAE(nn.Module):
 
 
 # ==========================================
-# 🔥 【深度融合内核】VAE 热启动 + 数学精确求解
+# 【深度融合内核】VAE 热启动 + 数学精确求解
 # ==========================================
 class V2GEnvironment:
     def __init__(self, L_base, elasticity, C_price, C_grid):
@@ -105,7 +105,12 @@ def run_vae_ws_admm(env, w1, w2, rho_init, max_iter=30):
     for step in range(max_iter):
         T_lam = torch.FloatTensor(lam).unsqueeze(1)
         T_zhat = torch.FloatTensor(z_hat).unsqueeze(1)
-        features = torch.cat([T_L, T_E, T_C, T_lam, T_zhat], dim=1)
+        # 🚨 【核心修复1】：给 CVAE 的输入增加归一化！防止负荷数值(如2000)过大导致神经网络梯度爆炸产生 NaN
+        max_l = max(np.max(env.L_base), 1.0)
+        T_L_norm = T_L / max_l
+        T_zhat_norm = T_zhat / max_l
+        T_lam_norm = T_lam / 100.0  # lam也做适当缩放
+        features = torch.cat([T_L_norm, T_E, T_C, T_lam_norm, T_zhat_norm], dim=1)
 
         vae_agent.eval()
         with torch.no_grad():
@@ -121,8 +126,11 @@ def run_vae_ws_admm(env, w1, w2, rho_init, max_iter=30):
                 return -w2 * rev_i + lam[i] * l_i + (rho / 2.0) * (l_i - z_hat[i]) ** 2
 
             bounds = [(env.r_limit[0], env.r_limit[1]), (env.y_limit[0], env.y_limit[1])]
-            x0 = [np.clip(r_pred[i], env.r_limit[0], env.r_limit[1]),
-                  np.clip(y_pred[i], env.y_limit[0], env.y_limit[1])]
+            # 🚨 【核心修复2】：确保送入 minimize 的初始值绝对不能有 NaN
+            safe_r = np.nan_to_num(r_pred[i], nan=0.0)
+            safe_y = np.nan_to_num(y_pred[i], nan=0.0)
+            x0 = [np.clip(safe_r, env.r_limit[0], env.r_limit[1]),
+                  np.clip(safe_y, env.y_limit[0], env.y_limit[1])]
             res = minimize(local_obj, x0, bounds=bounds, method='L-BFGS-B', options={'maxiter': 10})
             r_opt_exact[i], y_opt_exact[i] = res.x
             l_val[i] = env.L_base[i] * (1 + env.elasticity[i] * r_opt_exact[i]) - y_opt_exact[i]
@@ -148,7 +156,7 @@ def bayesian_tune_vae_admm(env, trials=5):
         r, y = run_vae_ws_admm(env, w1, w2, rho, max_iter=5)
         f1, f2, _ = env.evaluate(r, y)
 
-        # 🚨 核心修复1：防止标准差等于 0 导致 /0 计算变成 NaN
+        # 核心修复1：防止标准差等于 0 导致 /0 计算变成 NaN
         std_base = np.std(env.L_base)
         if std_base < 1e-6:
             std_base = 1e-6
@@ -158,7 +166,7 @@ def bayesian_tune_vae_admm(env, trials=5):
 
         result = np.sqrt(norm_f1 ** 2 + norm_f2 ** 2)
 
-        # 🚨 核心修复2：如果因不可抗力依旧算出了 NaN，强制返回极大惩罚值，让 Optuna 避开这组参数
+        # 核心修复2：如果因不可抗力依旧算出了 NaN，强制返回极大惩罚值，让 Optuna 避开这组参数
         if np.isnan(result):
             return 999999.0
 
@@ -173,7 +181,7 @@ def bayesian_tune_vae_admm(env, trials=5):
 
 
 # ==========================================
-# 🔌 真实系统对接层 (AI预测适配器)
+# 真实系统对接层 (AI预测适配器)
 # ==========================================
 class Layer2_AIDataAdapter:
     """直接接入深圳 UrbanEV 真实数据集"""

@@ -1,10 +1,7 @@
 <template>
   <div class="component-wrapper">
     <div class="panel-header">
-      <h3 class="panel-title">🌐 区域状态矩阵映射 (真实节点 ID)</h3>
-      <div class="term-explanations">
-        <span title="底层数据源于 adj.csv，此处将节点状态映射为电价或负荷压力。颜色偏红代表提价(抑制充电)，偏绿代表降价。">❓ 节点状态说明</span>
-      </div>
+      <h3 class="panel-title">🌐 深圳市 UrbanEV 节点调控映射</h3>
     </div>
     <div ref="chartRef" class="echarts-container"></div>
   </div>
@@ -15,69 +12,103 @@ import { ref, onMounted, watch } from 'vue';
 import * as echarts from 'echarts';
 import { systemState } from '../store/wsStore';
 
+// 🚨 【重要】你需要在这里引入深圳市的 GeoJSON 文件
+// import shenzhenGeoJson from '../assets/shenzhen.json';
+// 🚨 【重要】你需要在这里引入 275 个节点的经纬度映射 (ID -> [经度, 纬度])
+// import geoCoordMap from '../assets/node_coordinates.json';
+
 const chartRef = ref(null);
 let chartInstance = null;
+
+// Mock 坐标系，防止无数据时报错 (你需要用真实的替换这段)
+const mockGeoCoordMap = {};
+for(let i=0; i<275; i++) {
+  mockGeoCoordMap[i] = [113.8 + Math.random()*0.5, 22.5 + Math.random()*0.3];
+}
 
 onMounted(() => {
   chartInstance = echarts.init(chartRef.value);
 
+  // 注册地图 (假设你有了 shenzhenGeoJson)
+  // echarts.registerMap('shenzhen', shenzhenGeoJson);
+
   const option = {
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'item', formatter: '节点 ID: {b}<br/>状态参数: {c}' },
+    tooltip: {
+      trigger: 'item',
+      formatter: function (params) {
+        return `节点 ID: ${params.data.name}<br/>调价系数: ${params.data.value[2]}`;
+      }
+    },
     visualMap: {
       type: 'continuous',
+      min: -1,
+      max: 1, // 根据你的 r_opt 弹性范围调整
       calculable: true,
       inRange: { color: ['#00fa9a', '#1e90ff', '#ff4500'] }, // 绿->蓝->红
-      text: ['高', '低'],
-      textStyle: { color: '#ccc' },
-      orient: 'horizontal', left: 'center', bottom: 10
+      text: ['高压区 (提价)', '低压区 (降价)'],
+      textStyle: { color: '#00eaff' },
+      bottom: 20,
+      left: 20
+    },
+    geo: {
+      map: 'shenzhen', // 如果没有 GeoJSON，可以暂时去掉 geo 配置，改用 grid 散点
+      roam: true,
+      itemStyle: {
+        areaColor: '#0a1a3a', // 科技蓝底图
+        borderColor: '#00eaff',
+        borderWidth: 1
+      },
+      emphasis: { itemStyle: { areaColor: '#1e90ff' } }
     },
     series: [
       {
-        type: 'graph',
-        layout: 'circular', // 因为没有真实经纬度，采用标准环形布局展示 N 个节点
-        roam: true,
-        label: { show: false }, // 节点过多时隐藏文字，悬浮显示 Node ID
-        itemStyle: { shadowBlur: 10, shadowColor: 'rgba(255, 255, 255, 0.2)' },
+        name: 'V2G Nodes',
+        type: 'effectScatter', // 涟漪特效散点
+        coordinateSystem: 'geo',
+        symbolSize: 8,
+        rippleEffect: {
+          brushType: 'stroke',
+          scale: 3
+        },
         data: []
       }
     ]
   };
+
+  // 如果暂时没有 GeoJSON，降级为普通笛卡尔坐标系的散点图查看效果
+  if (!echarts.getMap('shenzhen')) {
+    option.geo = undefined;
+    option.xAxis = { show: false, scale: true };
+    option.yAxis = { show: false, scale: true };
+    option.series[0].coordinateSystem = 'cartesian2d';
+  }
+
   chartInstance.setOption(option);
   window.addEventListener('resize', () => chartInstance.resize());
 });
 
-// 严格绑定后端下发的状态矩阵 (不再凭空捏造数据)
 watch(() => systemState.stations, (newStations) => {
   if (chartInstance && newStations && newStations.length > 0) {
-    // 计算数据的最大最小值，以动态调整 VisualMap 区间
-    const values = newStations.map(v => typeof v === 'object' ? v.value : v);
-    const maxVal = Math.max(...values);
-    const minVal = Math.min(...values);
-
     const realNodes = newStations.map((item, idx) => {
-      // 兼容后端发来的是对象还是单一数值
       const val = typeof item === 'object' ? item.value : item;
+      const coord = mockGeoCoordMap[idx]; // 替换为真实的 geoCoordMap
       return {
-        name: `Node_${idx}`, // 绝对不使用虚构城市名，使用真实索引 ID
-        value: val.toFixed(3),
-        symbolSize: 15 // 统一节点大小
+        name: String(idx),
+        value: [coord[0], coord[1], val] // [经度, 纬度, 调价系数]
       };
     });
 
     chartInstance.setOption({
-      visualMap: { min: minVal, max: maxVal },
       series: [{ data: realNodes }]
     });
   }
-}, { deep: true, immediate: true });
+}, { deep: true });
 </script>
 
 <style scoped>
-.component-wrapper { display: flex; flex-direction: column; height: 100%; }
-.panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
-.panel-title { font-size: 1rem; color: #00fa9a; font-weight: 500; }
-.term-explanations { font-size: 0.75rem; color: #888; }
-.term-explanations span { cursor: help; border-bottom: 1px dotted #666; }
-.echarts-container { flex: 1; }
+.component-wrapper { height: 100%; display: flex; flex-direction: column; }
+.panel-header { position: absolute; top: 20px; left: 20px; z-index: 5; }
+.panel-title { color: #00eaff; font-size: 1.2rem; font-weight: 600; text-shadow: 0 0 10px rgba(0, 234, 255, 0.5); }
+.echarts-container { flex: 1; width: 100%; height: 100%; }
 </style>
