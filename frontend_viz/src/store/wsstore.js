@@ -32,6 +32,9 @@ export function initWebSocket(wsUrl = 'ws://127.0.0.1:8000/ws/dashboard') {
         // 进入新的一小时调度
         systemState.baselineCurve = data.payload.baseline;
         systemState.cloudTargetCurve = data.payload.target;
+        if (data.payload.price_adjustments) {
+            systemState.stations = data.payload.price_adjustments;
+        }
         // 清空轨迹
         systemState.actualLoadCurve = [];
         systemState.currentStep = 0;

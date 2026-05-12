@@ -12,103 +12,103 @@ import { ref, onMounted, watch } from 'vue';
 import * as echarts from 'echarts';
 import { systemState } from '../store/wsStore';
 
-// 🚨 【重要】你需要在这里引入深圳市的 GeoJSON 文件
-// import shenzhenGeoJson from '../assets/shenzhen.json';
-// 🚨 【重要】你需要在这里引入 275 个节点的经纬度映射 (ID -> [经度, 纬度])
-// import geoCoordMap from '../assets/node_coordinates.json';
+// 🚨 引入真实的地图与坐标数据 (请确保你的文件路径与命名和下面一致)
+import shenzhenGeoJson from '../assets/shenzhen.json';
+import geoCoordMap from '../assets/node_coordinates.json';
 
 const chartRef = ref(null);
 let chartInstance = null;
 
-// Mock 坐标系，防止无数据时报错 (你需要用真实的替换这段)
-const mockGeoCoordMap = {};
-for(let i=0; i<275; i++) {
-  mockGeoCoordMap[i] = [113.8 + Math.random()*0.5, 22.5 + Math.random()*0.3];
-}
-
 onMounted(() => {
   chartInstance = echarts.init(chartRef.value);
 
-  // 注册地图 (假设你有了 shenzhenGeoJson)
-  // echarts.registerMap('shenzhen', shenzhenGeoJson);
+  // 1. 核心：向 Echarts 注册深圳地图底图数据
+  echarts.registerMap('shenzhen', shenzhenGeoJson);
 
   const option = {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'item',
       formatter: function (params) {
-        return `节点 ID: ${params.data.name}<br/>调价系数: ${params.data.value[2]}`;
+        return `节点: <b>Node ${params.name}</b><br/>云端调价系数: ${params.value[2].toFixed(3)}`;
       }
     },
+    // 2. 添加视觉映射组件：根据第三个维度的值(调价系数)自动赋予红黄绿颜色
     visualMap: {
-      type: 'continuous',
-      min: -1,
-      max: 1, // 根据你的 r_opt 弹性范围调整
+      min: -0.2, // 根据你算法下发的价格调节范围设置最小值
+      max: 0.2,  // 根据你算法下发的价格调节范围设置最大值
       calculable: true,
-      inRange: { color: ['#00fa9a', '#1e90ff', '#ff4500'] }, // 绿->蓝->红
-      text: ['高压区 (提价)', '低压区 (降价)'],
-      textStyle: { color: '#00eaff' },
-      bottom: 20,
-      left: 20
-    },
-    geo: {
-      map: 'shenzhen', // 如果没有 GeoJSON，可以暂时去掉 geo 配置，改用 grid 散点
-      roam: true,
-      itemStyle: {
-        areaColor: '#0a1a3a', // 科技蓝底图
-        borderColor: '#00eaff',
-        borderWidth: 1
+      inRange: {
+        color: ['#00fa9a', '#f4e925', '#ff4500'] // 绿(降价放电) -> 黄 -> 红(涨价抑制)
       },
-      emphasis: { itemStyle: { areaColor: '#1e90ff' } }
+      textStyle: { color: '#ccc' },
+      bottom: '10%',
+      left: '3%'
+    },
+    // 3. 配置真实的地理坐标系底图外观
+    geo: {
+      map: 'shenzhen',
+      roam: true, // 开启鼠标缩放和平移拖拽
+      zoom: 1.1,
+      label: { emphasis: { show: false } },
+      itemStyle: {
+        normal: {
+          areaColor: '#0a1a2a', // 地图板块底色
+          borderColor: '#00eaff', // 科技蓝边框
+          borderWidth: 1
+        },
+        emphasis: {
+          areaColor: '#1a2e40' // 鼠标悬浮时的板块颜色
+        }
+      }
     },
     series: [
       {
-        name: 'V2G Nodes',
+        name: 'V2G 调控节点',
         type: 'effectScatter', // 涟漪特效散点
-        coordinateSystem: 'geo',
+        coordinateSystem: 'geo', // 绑定到前面的 geo 坐标系
         symbolSize: 8,
-        rippleEffect: {
-          brushType: 'stroke',
-          scale: 3
-        },
+        rippleEffect: { brushType: 'stroke', scale: 3 },
         data: []
       }
     ]
   };
 
-  // 如果暂时没有 GeoJSON，降级为普通笛卡尔坐标系的散点图查看效果
-  if (!echarts.getMap('shenzhen')) {
-    option.geo = undefined;
-    option.xAxis = { show: false, scale: true };
-    option.yAxis = { show: false, scale: true };
-    option.series[0].coordinateSystem = 'cartesian2d';
-  }
-
   chartInstance.setOption(option);
   window.addEventListener('resize', () => chartInstance.resize());
 });
 
+// 4. 监听云端下发的数据并渲染真实节点
 watch(() => systemState.stations, (newStations) => {
   if (chartInstance && newStations && newStations.length > 0) {
-    const realNodes = newStations.map((item, idx) => {
-      const val = typeof item === 'object' ? item.value : item;
-      const coord = mockGeoCoordMap[idx]; // 替换为真实的 geoCoordMap
-      return {
-        name: String(idx),
-        value: [coord[0], coord[1], val] // [经度, 纬度, 调价系数]
-      };
+    // 解构 Proxy，防止报错
+    const rawStations = [...newStations];
+    const realNodes = [];
+
+    rawStations.forEach((val, idx) => {
+      // 兼容数组格式的坐标映射
+      // 假设 node_coordinates.json 的格式是: { "0": [114.05, 22.54], "1": [...] }
+      const coord = geoCoordMap[String(idx)] || geoCoordMap[idx];
+
+      if (coord && coord.length === 2) {
+        realNodes.push({
+          name: String(idx),
+          value: [coord[0], coord[1], val] // [经度, 纬度, 算法下发的调价系数]
+        });
+      }
     });
 
+    // 动态更新节点数据
     chartInstance.setOption({
       series: [{ data: realNodes }]
     });
   }
-}, { deep: true });
+}, { deep: true, immediate: true });
 </script>
 
 <style scoped>
-.component-wrapper { height: 100%; display: flex; flex-direction: column; }
-.panel-header { position: absolute; top: 20px; left: 20px; z-index: 5; }
-.panel-title { color: #00eaff; font-size: 1.2rem; font-weight: 600; text-shadow: 0 0 10px rgba(0, 234, 255, 0.5); }
-.echarts-container { flex: 1; width: 100%; height: 100%; }
+.component-wrapper { display: flex; flex-direction: column; height: 100%; width: 100%; }
+.panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.panel-title { margin: 0; font-size: 1.1rem; font-weight: 600; color: #00eaff; }
+.echarts-container { flex: 1; min-height: 400px; }
 </style>

@@ -263,4 +263,4 @@ async def websocket_endpoint(websocket: WebSocket):
 if __name__ == "__main__":
     print("🚀 正在启动 Data Hub...")
     print(f"📍 WS 监听地址: ws://{config.WS_HOST}:{config.WS_PORT}{config.WS_PATH}")
-    uvicorn.run("main:app", host=config.WS_HOST, port=config.WS_PORT, reload=False)
+    uvicorn.run("data_hub:app", host=config.WS_HOST, port=config.WS_PORT, reload=False)

@@ -9,7 +9,7 @@ def start_system():
     processes = []
     try:
         # 1. 启动云端调度核心与前端 WebSocket 网关
-        print("☁️ [1/2] 启动云端中心 (FastAPI + DataHub)...")
+        print("①启动云端中心 (FastAPI + DataHub)...")
         cloud_proc = subprocess.Popen([sys.executable, "run_system.py"])
         processes.append(cloud_proc)
 
@@ -17,9 +17,13 @@ def start_system():
         time.sleep(3)
 
         # 2. 启动边端仿真集群
-        print("[2/2] 启动边端并发仿真集群...")
+        print("②启动边端并发仿真集群...")
         edge_proc = subprocess.Popen([sys.executable, "edge_simulation/edge.py"])
         processes.append(edge_proc)
+
+        print("③启动数据中台 (DataHub)...")
+        datahub_proc = subprocess.Popen([sys.executable, "data_hub/data_hub.py"])  # 假设在同级或 data_hub 目录下
+        processes.append(datahub_proc)
 
         print("全系统启动完毕！请访问前端 Dashboard。")
 
