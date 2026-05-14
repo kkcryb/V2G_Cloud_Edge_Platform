@@ -15,6 +15,7 @@
 </template>
 
 <script setup>
+import { onMounted } from 'vue';
 import LoadTracker from './components/LoadTracker.vue';
 import MapHeatmap from './components/MapHeatmap.vue';
 import KpiDashboard from './components/KpiDashboard.vue';
