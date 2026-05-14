@@ -19,6 +19,12 @@ import LoadTracker from './components/LoadTracker.vue';
 import MapHeatmap from './components/MapHeatmap.vue';
 import KpiDashboard from './components/KpiDashboard.vue';
 // 确保在 main.js 或此处初始化你的 WebSocket 监听
+import { initWebSocket } from './store/wsstore.js';
+
+onMounted(() => {
+  console.log("正在初始化 WebSocket 连接...");
+  initWebSocket(); // 启动连接！
+});
 </script>
 
 <style>

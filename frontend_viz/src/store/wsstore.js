@@ -46,7 +46,10 @@ export function initWebSocket(wsUrl = 'ws://127.0.0.1:8000/ws/dashboard') {
         systemState.actualLoadCurve = data.payload.actual_curve;
 
         systemState.currentStep = data.payload.step;
-        systemState.nodeDetails = data.payload.node_details;
+        if (data.payload.node_details !== undefined) {
+            systemState.nodeDetails = data.payload.node_details;
+        }
+        //systemState.nodeDetails = data.payload.node_details;
 
         // 如果后端传了进度则更新
         if (data.payload.v2g_progress !== undefined) {

@@ -133,7 +133,11 @@ def write_to_influxdb(timestamp, total_load, node_details):
 # ==========================================
 async def run_simulation_loop():
     print("🚀 云端调度核心已启动，等待边端连接与前端订阅...")
-    await asyncio.sleep(5)  # 留出时间让用户打开浏览器
+    while not connected_websockets:
+        await asyncio.sleep(1)
+
+    print("✅ 检测到前端大屏已连接，3秒后正式开始云边协同仿真！")
+    await asyncio.sleep(3)
 
     hour_counter = 8
     while hour_counter < 24:
